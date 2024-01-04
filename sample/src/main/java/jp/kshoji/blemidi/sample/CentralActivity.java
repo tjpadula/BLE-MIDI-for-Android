@@ -17,6 +17,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
@@ -31,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -82,6 +85,9 @@ public class CentralActivity extends Activity {
                 scanDuration = duration;
                 if (shouldShowRequestPermissionRationale(Manifest.permission.BLUETOOTH_SCAN) ||
                     shouldShowRequestPermissionRationale(Manifest.permission.BLUETOOTH_CONNECT)) {
+                    requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, PERMISSION_REQUEST_FINE_LOCATION);
+                } else {
+                    Log.d("NSLog", "Permission isn''t granted, but we're not supposed to explain why?");
                     requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, PERMISSION_REQUEST_FINE_LOCATION);
                 }
                 return;
@@ -466,12 +472,20 @@ public class CentralActivity extends Activity {
                 int note = 60 + Integer.parseInt((String) v.getTag());
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
-                        midiOutputDevice.sendMidiNoteOn(0, note, 127);
-                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "NoteOn to: " + midiOutputDevice.getDeviceName() + ", note: " + note + ", velocity: 127"));
+                        midiOutputDevice.sendRPNMessage(1, 0, 0, 128);
+                        midiOutputDevice.sendRPNMessage(2, 0, 0, 128);
+                        midiOutputDevice.sendRPNMessage(3, 0, 0, 128);
+//                        midiOutputDevice.sendMidiNoteOn(0, note, 127);
+//                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "NoteOn to: " + midiOutputDevice.getDeviceName() + ", note: " + note + ", velocity: 127"));
+                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "Send RPN. "));
                         break;
                     case MotionEvent.ACTION_UP:
-                        midiOutputDevice.sendMidiNoteOff(0, note, 127);
-                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "NoteOff to: " + midiOutputDevice.getDeviceName() + ", note: " + note + ", velocity: 127"));
+                        midiOutputDevice.sendRPNMessage(4, 0, 0, 128);
+                        midiOutputDevice.sendRPNMessage(5, 0, 0, 128);
+                        midiOutputDevice.sendRPNMessage(6, 0, 0, 128);
+//                        midiOutputDevice.sendMidiNoteOff(0, note, 127);
+//                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "NoteOff to: " + midiOutputDevice.getDeviceName() + ", note: " + note + ", velocity: 127"));
+                        midiOutputEventHandler.sendMessage(Message.obtain(midiOutputEventHandler, 0, "Send RPN. "));
                         v.performClick();
                         break;
                     default:
