@@ -1,5 +1,7 @@
 package jp.kshoji.blemidi.central;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.bluetooth.BluetoothDevice;
@@ -310,6 +312,16 @@ public final class BleMidiCallback extends BluetoothGattCallback {
     }
 
     @Override
+    public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+        Log.d(Constants.TAG, "onCharacteristicWrite: completed, status: " + status);
+    }
+
+        @Override
+    public void onReliableWriteCompleted(BluetoothGatt gatt, int status) {
+        Log.d(Constants.TAG, "onReliableWriteCompleted: completed, status: " + status);
+    }
+
+    @Override
     public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
         super.onCharacteristicChanged(gatt, characteristic);
 
@@ -353,8 +365,10 @@ public final class BleMidiCallback extends BluetoothGattCallback {
         synchronized (midiOutputDevicesMap) {
             Set<MidiOutputDevice> midiOutputDevices = midiOutputDevicesMap.get(gatt.getDevice().getAddress());
             if (midiOutputDevices != null) {
+                int aBufferSize = mtu < 23 ? 20 : mtu - 3;
                 for (MidiOutputDevice midiOutputDevice : midiOutputDevices) {
-                    ((InternalMidiOutputDevice) midiOutputDevice).setBufferSize(mtu < 23 ? 20 : mtu - 3);
+                    Log.d(Constants.TAG, "onMtuChanged device: " + midiOutputDevice.getDeviceName() + ", aBufferSize: " + aBufferSize);
+                    ((InternalMidiOutputDevice) midiOutputDevice).setBufferSize(aBufferSize);
                 }
             }
         }
@@ -789,10 +803,24 @@ public final class BleMidiCallback extends BluetoothGattCallback {
 
         @Override
         public void transferData(@NonNull byte[] writeBuffer) throws SecurityException {
-            midiOutputCharacteristic.setValue(writeBuffer);
+//             midiOutputCharacteristic.setValue(writeBuffer);
+            if (writeBuffer.length > bufferSize) {
+                Log.d("NSLOG", "transferData given size: " + writeBuffer.length + "is greater than buffer size: " + bufferSize);
+            }
 
             try {
-                bluetoothGatt.writeCharacteristic(midiOutputCharacteristic);
+//                 bluetoothGatt.writeCharacteristic(midiOutputCharacteristic);
+                if (Build.VERSION.SDK_INT < TIRAMISU) {
+                    boolean aSuccess = midiOutputCharacteristic.setValue(writeBuffer);
+                    Log.d("NSLOG", "midiOutputCharacteristic.setValue Result: " + (aSuccess ? "Success" : "Failure"));
+                    // This will cause onCharacteristicWrite() to be called with the results of the write.
+                    aSuccess = bluetoothGatt.writeCharacteristic(midiOutputCharacteristic);
+                    Log.d("NSLOG", "bluetoothGatt.writeCharacteristic Result: " + (aSuccess ? "Success" : "Failure"));
+                } else {
+                    // This will cause onCharacteristicWrite() to be called with the results of the write.
+                    int aSuccess = bluetoothGatt.writeCharacteristic(midiOutputCharacteristic, writeBuffer, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                    Log.d("NSLOG", "bluetoothGatt.writeCharacteristic Result: " + aSuccess);
+                }
             } catch (Throwable ignored) {
                 // android.os.DeadObjectException will be thrown
                 // ignore it

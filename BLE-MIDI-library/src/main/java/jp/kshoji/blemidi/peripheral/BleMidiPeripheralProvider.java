@@ -335,8 +335,10 @@ public final class BleMidiPeripheralProvider {
 
             synchronized (midiOutputDevicesMap) {
                 MidiOutputDevice midiOutputDevice = midiOutputDevicesMap.get(device.getAddress());
+                int aBufferSize = mtu < 23 ? 20 : mtu - 3;
                 if (midiOutputDevice != null) {
-                    ((InternalMidiOutputDevice)midiOutputDevice).setBufferSize(mtu < 23 ? 20 : mtu - 3);
+                    Log.d(Constants.TAG, "onMtuChanged device: " + midiOutputDevice.getDeviceName() + ", aBufferSize: " + aBufferSize);
+                    ((InternalMidiOutputDevice)midiOutputDevice).setBufferSize(aBufferSize);
                 }
             }
             Log.d(Constants.TAG, "Peripheral onMtuChanged address: " + device.getAddress() + ", mtu: " + mtu);

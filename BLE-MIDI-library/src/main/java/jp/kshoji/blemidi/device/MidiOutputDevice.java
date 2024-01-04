@@ -1,6 +1,7 @@
 package jp.kshoji.blemidi.device;
 
 import android.support.annotation.NonNull;
+import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -67,6 +68,11 @@ public abstract class MidiOutputDevice {
         return getDeviceName();
     }
 
+    /**
+     * This method does not have any way to prevent it from firehosing the BT system. If
+     * a transfer takes more than 10 mSec to be sent, then this call could either block (bad)
+     * or clobber outgoing data (worse).
+     */
     volatile boolean transferDataThreadAlive;
     volatile boolean isRunning;
     final Thread transferDataThread = new Thread(new Runnable() {
@@ -78,6 +84,7 @@ public abstract class MidiOutputDevice {
                 // running
                 while (!transferDataThreadAlive && isRunning) {
                     synchronized (transferDataStream) {
+	                    Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
                         if (writtenDataCount > 0) {
                             transferData(transferDataStream.toByteArray());
                             transferDataStream.reset();
@@ -146,6 +153,27 @@ public abstract class MidiOutputDevice {
         transferDataThread.interrupt();
     }
 
+    /**
+     * This is broken in several ways:
+     *      It has no flow control, that is, it can firehose the BT hardware.
+     *      It also does not check for excessive size of transferDataStream, which
+     *          can typically handle 20 bytes max, and break up packets as needed. Multiple
+     *          calls in a short time can overwhelm packet limits (such as an RPN call).
+     *      It does not properly deal with running status when starting a new packet.
+     *      It does not handle sysex properly.
+     *      It does not handle real-time system messages properly, that is, it does not
+     *          de-interleave them from non-sysex messages.
+     *      Timestamps are not guaranteed to be monotonically increasing, the same low timestamp
+     *          could be re-sent if multiple calls are made within the same millisecond.
+     *
+     * The timestamps are actually the big issue. We should buffer up messages as they come in
+     * without any time info and then create a proper packet of limited size and send it
+     * when BT indicates that it is ready. This keeps us from violating the monotonically
+     * increasing requirement while also preventing firehosing. It also keeps us from having
+     * to worry about violating the 'timestamps in the future' prohibition. A three-stream
+     * pattern of data messages can do this efficiently.
+     *
+     */
     transient int writtenDataCount;
     private void storeTransferData(byte[] data) {
         if (!transferDataThreadAlive || !isRunning) {
@@ -167,6 +195,7 @@ public abstract class MidiOutputDevice {
                 writtenDataCount += data.length;
             } catch (IOException ignored) {
             }
+            Log.d("NSLOG", "storeTransferData: byte count: " + writtenDataCount);
         }
     }
 
@@ -204,6 +233,14 @@ public abstract class MidiOutputDevice {
      * SysEx
      *
      * @param systemExclusive : start with 'F0', and end with 'F7'
+     *
+     * This does not handle the per-buffer timestamps properly.
+     * Tinkering with a timestamp value to avoid breaking the parser elsewhere in
+     * this module is no bueno - it could violate the monotonically increasing requirement.
+     * System real-time messages are not properly inserted with sysex, as they dispatch
+     * through the transfer data thread above.
+     * And, as in storeTransferData(), this can firehose the BT hardware.
+     *
      */
     public final void sendMidiSystemExclusive(@NonNull byte[] systemExclusive) {
         byte[] timestampAddedSystemExclusive = new byte[systemExclusive.length + 2];
