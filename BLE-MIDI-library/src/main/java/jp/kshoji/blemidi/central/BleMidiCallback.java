@@ -141,7 +141,11 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                     @Override
                     public void run() {
                         // this calls onCharacteristicRead after completed
-                        gatt.readCharacteristic(manufacturerCharacteristic);
+                        boolean aSuccess = gatt.readCharacteristic(manufacturerCharacteristic);
+                        if (!aSuccess) {
+                            Log.d(Constants.TAG, "Request for manufacturer characteristic failed: " + manufacturerCharacteristic);
+                            runNextGattRequest();
+                        }
                     }
                 });
             }
@@ -152,7 +156,11 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                     @Override
                     public void run() {
                         // this calls onCharacteristicRead after completed
-                        gatt.readCharacteristic(modelCharacteristic);
+                        boolean aSuccess = gatt.readCharacteristic(modelCharacteristic);
+                        if (!aSuccess) {
+                            Log.d(Constants.TAG, "Request for model characteristic failed: " + modelCharacteristic);
+                            runNextGattRequest();
+                        }
                     }
                 });
             }
@@ -164,8 +172,12 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                 public void run() {
                     // request maximum MTU size
                     // this calls onMtuChanged after completed
-                    boolean result = gatt.requestMtu(517); // GATT_MAX_MTU_SIZE defined at `stack/include/gatt_api.h`
-                    Log.d(Constants.TAG, "Central requestMtu address: " + gatt.getDevice().getAddress() + ", succeed: " + result);
+                    boolean aSuccess = gatt.requestMtu(517); // GATT_MAX_MTU_SIZE defined at `stack/include/gatt_api.h`
+                    Log.d(Constants.TAG, "Central requestMtu address: " + gatt.getDevice().getAddress() + ", succeed: " + aSuccess);
+                    if (!aSuccess) {
+                        Log.d(Constants.TAG, "Request for requestMtu(517) failed.");
+                        runNextGattRequest();
+                    }
                 }
             });
         }
@@ -303,6 +315,8 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                     }
                 }
 
+                runNextGattRequest();
+
                 // all finished
                 gattDiscoverServicesLock = null;
             }
@@ -323,19 +337,35 @@ public final class BleMidiCallback extends BluetoothGattCallback {
 
     @Override
     public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-        super.onCharacteristicChanged(gatt, characteristic);
+        this.onCharacteristicChanged(gatt,  characteristic, characteristic.getValue());
+    }
 
+    @Override
+    public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
         Set<MidiInputDevice> midiInputDevices = midiInputDevicesMap.get(gatt.getDevice().getAddress());
         if (midiInputDevices != null) {
             for (MidiInputDevice midiInputDevice : midiInputDevices) {
-                ((InternalMidiInputDevice)midiInputDevice).incomingData(characteristic.getValue());
+                ((InternalMidiInputDevice)midiInputDevice).incomingData(value);
             }
         }
     }
 
     @Override
+    public void	onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+        this.onDescriptorRead(gatt, descriptor, status, descriptor.getValue());
+    }
+
+    @Override
+    public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status, byte[] value) {
+    }
+
+    @Override
+    public void	onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+        this.onCharacteristicRead(gatt, characteristic, characteristic.getValue(), status);
+    }
+
+    @Override
     public void onCharacteristicRead(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value, int status) {
-        super.onCharacteristicRead(gatt, characteristic, value, status);
 
         if (BleUuidUtils.matches(characteristic.getUuid(), BleMidiDeviceUtils.CHARACTERISTIC_MANUFACTURER_NAME) && value != null && value.length > 0) {
             String manufacturer = new String(value);
@@ -351,6 +381,10 @@ public final class BleMidiCallback extends BluetoothGattCallback {
             }
         }
 
+        runNextGattRequest();
+    }
+
+    void runNextGattRequest() {
         synchronized (gattRequestQueue) {
             if (gattRequestQueue.size() > 0) {
                 gattRequestQueue.remove(0).run();
@@ -374,11 +408,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
         }
         Log.d(Constants.TAG, "Central onMtuChanged address: " + gatt.getDevice().getAddress() + ", mtu: " + mtu + ", status: " + status);
 
-        synchronized (gattRequestQueue) {
-            if (gattRequestQueue.size() > 0) {
-                gattRequestQueue.remove(0).run();
-            }
-        }
+        runNextGattRequest();
     }
 
     /**

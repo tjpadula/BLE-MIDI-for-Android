@@ -82,10 +82,10 @@ public abstract class MidiOutputDevice {
 
             while (true) {
                 // running
-                while (!transferDataThreadAlive && isRunning) {
+                while (transferDataThreadAlive && isRunning) {
                     synchronized (transferDataStream) {
-	                    Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
                         if (writtenDataCount > 0) {
+	                    	Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
                             transferData(transferDataStream.toByteArray());
                             transferDataStream.reset();
                             writtenDataCount = 0;
