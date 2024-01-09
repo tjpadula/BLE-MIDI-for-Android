@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -53,7 +54,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
     private final Map<String, String> deviceAddressManufacturerMap = new HashMap<>();
     private final Map<String, String> deviceAddressModelMap = new HashMap<>();
 
-    List<Runnable> gattRequestQueue = new ArrayList<>();
+    final List<Runnable> gattRequestQueue = new ArrayList<>();
     private final Context context;
 
     private OnMidiDeviceAttachedListener midiDeviceAttachedListener;
@@ -204,7 +205,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                 try {
                     midiInputDevice = new InternalMidiInputDevice(context, gatt, deviceAddressManufacturerMap.get(gattDeviceAddress), deviceAddressModelMap.get(gattDeviceAddress));
                 } catch (IllegalArgumentException iae) {
-                    Log.d(Constants.TAG, iae.getMessage());
+                    Log.d(Constants.TAG, Objects.requireNonNull(iae.getMessage()));
                 }
                 if (midiInputDevice != null) {
                     synchronized (midiInputDevicesMap) {
@@ -246,7 +247,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                 try {
                     midiOutputDevice = new InternalMidiOutputDevice(context, gatt, deviceAddressManufacturerMap.get(gattDeviceAddress), deviceAddressModelMap.get(gattDeviceAddress));
                 } catch (IllegalArgumentException iae) {
-                    Log.d(Constants.TAG, iae.getMessage());
+                    Log.d(Constants.TAG, Objects.requireNonNull(iae.getMessage()));
                 }
                 if (midiOutputDevice != null) {
                     synchronized (midiOutputDevicesMap) {
@@ -290,7 +291,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
                                 bluetoothDevice.setPairingConfirmation(true);
                             } catch (Throwable t) {
                                 // SecurityException if android.permission.BLUETOOTH_PRIVILEGED not available
-                                Log.d(Constants.TAG, t.getMessage());
+                                Log.d(Constants.TAG, Objects.requireNonNull(t.getMessage()));
                             }
 
                             if (bondingBroadcastReceiver != null) {
@@ -327,6 +328,12 @@ public final class BleMidiCallback extends BluetoothGattCallback {
 
     @Override
     public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+        Set<MidiOutputDevice> midiOutputDevices = midiOutputDevicesMap.get(gatt.getDevice().getAddress());
+        if (midiOutputDevices != null) {
+            for (MidiOutputDevice midiOutputDevice : midiOutputDevices) {
+                midiOutputDevice.writeToBTSemaphore.release();              // all done
+            }
+        }
         Log.d(Constants.TAG, "onCharacteristicWrite: completed, status: " + status);
     }
 
@@ -341,7 +348,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
     }
 
     @Override
-    public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, byte[] value) {
+    public void onCharacteristicChanged(BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value) {
         Set<MidiInputDevice> midiInputDevices = midiInputDevicesMap.get(gatt.getDevice().getAddress());
         if (midiInputDevices != null) {
             for (MidiInputDevice midiInputDevice : midiInputDevices) {
@@ -356,7 +363,7 @@ public final class BleMidiCallback extends BluetoothGattCallback {
     }
 
     @Override
-    public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status, byte[] value) {
+    public void onDescriptorRead(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattDescriptor descriptor, int status, @NonNull byte[] value) {
     }
 
     @Override

@@ -1,10 +1,16 @@
 package jp.kshoji.blemidi.device;
 
+import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExEnd;
+import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExStart;
+
 import android.support.annotation.NonNull;
 import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.Semaphore;
 
 /**
  * Represents BLE MIDI Output Device
@@ -15,7 +21,9 @@ public abstract class MidiOutputDevice {
 
     public static final int MAX_TIMESTAMP = 8192;
 
-    final ByteArrayOutputStream transferDataStream = new ByteArrayOutputStream();
+    public final Semaphore writeToBTSemaphore = new Semaphore(1);
+
+    private final LinkedTransferQueue<byte[]> midiTransferQueue = new LinkedTransferQueue<byte[]>();
 
     /**
      * Transfer data
@@ -71,52 +79,234 @@ public abstract class MidiOutputDevice {
     /**
      * This method does not have any way to prevent it from firehosing the BT system. If
      * a transfer takes more than 10 mSec to be sent, then this call could either block (bad)
-     * or clobber outgoing data (worse).
+     * or clobber outgoing data (worse). Turns out calling transferData() before the hardware
+     * is ready clobbers data.
      */
     volatile boolean transferDataThreadAlive;
     volatile boolean isRunning;
     final Thread transferDataThread = new Thread(new Runnable() {
+
+        final int kMaxPacketBufferSize = 20;
+
+        private void acquireBTWriteSemaphore() {
+            boolean acquiredSuccessfully = false;
+            do {
+                try {
+                    writeToBTSemaphore.acquire();       // This blocks.
+                    acquiredSuccessfully = true;
+                } catch (InterruptedException e) {
+                    continue;       // If we were interrupted, just try again.
+                }
+            } while (!acquiredSuccessfully);
+        }
+
+        private byte[] takeFirstMessage() {
+            byte[] aMessage = null;
+            do {
+                try {
+                    aMessage = midiTransferQueue.take();        // This blocks.
+                } catch (InterruptedException e) {
+                    // shrug, just try again.
+                }
+            } while (aMessage == null);
+            return aMessage;
+        }
+
+        private void sendSysexMessage(byte[] inMessage, byte inTimestampHi, byte inTimestampLo) {
+            int aBytesUsed = 0;
+            final ByteArrayOutputStream packetDataStream = new ByteArrayOutputStream();
+            boolean aContinuingSysex = false;
+            byte[] aWriteMessage = new byte[0];
+            do {
+                packetDataStream.reset();
+                if (aContinuingSysex) {
+                    // Continuing packets have only the header byte.
+                    packetDataStream.write(inTimestampHi);
+                    aBytesUsed = 1;
+                } else {
+                    // The first sysex packet has both header and timestamp lo.
+                    packetDataStream.write(inTimestampHi);
+                    packetDataStream.write(inTimestampLo);
+                    aBytesUsed = 2;
+                }
+
+                // The +1 here is for the timestamp before the end-sysex status byte.
+                if (inMessage.length < (kMaxPacketBufferSize - (aBytesUsed + 1))) {
+                    // The remainder will fit. Copy all but the end-sysex status byte so
+                    // we can insert the timestamp lo byte before end-sysex.
+                    System.arraycopy(inMessage,     // source
+                            0,                      // source start location
+                            aWriteMessage,          // destination
+                            0,                      // destination start location
+                            inMessage.length - 1);  // num to copy
+                    try {
+                        packetDataStream.write(aWriteMessage);
+                    } catch (IOException e) {
+                        transferDataThreadAlive = false;        // bail
+                        Log.d("NSLOG", "Interrupted packetDataStream.write()");
+                        break;
+                    }
+                    packetDataStream.write(inTimestampLo);
+                    packetDataStream.write(inMessage[inMessage.length - 1]);  // end sysex
+                    inMessage = new byte[0];     // all done.
+                } else {
+                    // The remainder of the message won't fit. Insert what we can.
+                    aWriteMessage = Arrays.copyOf(inMessage, (kMaxPacketBufferSize - (aBytesUsed + 1)));
+                    try {
+                        packetDataStream.write(aWriteMessage);
+                    } catch (IOException e) {
+                        transferDataThreadAlive = false;        // bail
+                        Log.d("NSLOG", "Interrupted packetDataStream.write()");
+                        break;
+                    }
+                    // Copy the rest for next time around.
+                    inMessage = Arrays.copyOfRange(inMessage, (kMaxPacketBufferSize - (aBytesUsed + 1)), inMessage.length);
+                    aContinuingSysex = true;        // Indicate we need a following packet.
+                }
+
+                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
+                byte[] aPrintArray = packetDataStream.toByteArray();
+                transferData(packetDataStream.toByteArray());
+                packetDataStream.reset();
+
+                printPacket(aPrintArray);
+
+            } while (inMessage.length > 0);
+        }
+
+        // Returns number of bytes in the packet that were used for this message including timestamps.
+        private int sendStandardMessageWithFirstHeader(byte[] inMessage, byte inTimestampHi, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
+            // It fits.
+            inPacketDataStream.write(inTimestampHi);       // header
+            inPacketDataStream.write(inTimestampLo);
+            try {
+                inPacketDataStream.write(inMessage);
+            } catch (IOException e) {
+                transferDataThreadAlive = false;        // bail
+                Log.d("NSLOG", "Interrupted packetDataStream.write()");
+                return 0;
+            }
+            return 2 + inMessage.length;
+        }
+
+        // Returns number of bytes in the packet that were used for this message including timestamp.
+        private int sendStandardMessageWithFollowingHeader(byte[] inMessage, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
+            try {
+                inPacketDataStream.write(inTimestampLo);
+                inPacketDataStream.write(inMessage);
+            } catch (IOException e) {
+                transferDataThreadAlive = false;        // bail
+                Log.d("NSLOG", "Interrupted packetDataStream.write()");
+            }
+            return inMessage.length + 1;
+        }
+
         @Override
         public void run() {
             transferDataThreadAlive = true;
+            final ByteArrayOutputStream packetDataStream = new ByteArrayOutputStream();
 
-            while (true) {
-                // running
-                while (transferDataThreadAlive && isRunning) {
-                    synchronized (transferDataStream) {
-                        if (writtenDataCount > 0) {
-	                    	Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
-                            transferData(transferDataStream.toByteArray());
-                            transferDataStream.reset();
-                            writtenDataCount = 0;
-                        }
-                    }
+            while (transferDataThreadAlive) {
 
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException ignored) {
+                // Block until we can acquire the write-to-BT semaphore. Then we block until we
+                // can take the most recent data from the queue. Then we create a proper BT packet
+                // with as much as will fit, then transfer the data. Then we block until we can
+                // acquire the semaphore again. The BLEMIDICallback will release the semaphore
+                // when the packet has been sent to the hardware and the system is ready for
+                // another packet.
+
+                int aBytesUsed = 0;
+
+                this.acquireBTWriteSemaphore();
+
+                // We have the semaphore. Assemble as much data as will fit in a packet
+                // and send it along.
+                byte[] aMessage = this.takeFirstMessage();
+
+                // We have the first message for the packet. What time is it?
+                long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
+                byte aTimestampHi = (byte) (0x80 | ((timestamp >> 7) & 0x3f));
+                byte aTimestampLo = (byte) (0x80 | (timestamp & 0x7f));
+
+                // What kind of message do we have?
+                if (aMessage[0] == MIDIStatus_SysExStart.value) {
+                    if (aMessage[aMessage.length - 1] != MIDIStatus_SysExEnd.value) {
+                        Log.d("NSLOG", "Sysex message does not end with sysex end status byte: " + aMessage[aMessage.length - 1]);
+                        printPacket(aMessage);
+                        continue;
                     }
+                    this.sendSysexMessage(aMessage, aTimestampHi, aTimestampLo);
+
+                    // Yes, conceivably another message from the queue could fit after the
+                    // last sysex message. Start fresh anyway.
+                    continue;
+
+                } else if (aMessage.length < (kMaxPacketBufferSize - aBytesUsed)) { // Will the message fit?
+                    aBytesUsed += this.sendStandardMessageWithFirstHeader(aMessage, aTimestampHi, aTimestampLo, packetDataStream);
+                } else {
+                    // This message is too long and it's not sysex --?
+                    // Skip it.
+                    Log.d("NSLOG", "Skipping long non-sysex message, length: " + aMessage.length);
+                    printPacket(aMessage);
+                    continue;
                 }
-
-                if (!transferDataThreadAlive) {
+                if (!transferDataThreadAlive || !isRunning) {
                     break;
                 }
 
-                // stopping
-                while (!transferDataThreadAlive && !isRunning) {
-                    // sleep until interrupt
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException ignored) {
+                // Check for the next message. If it will fit, add it, then check again.
+                byte[] aNextMessage = midiTransferQueue.peek();     // can't block
+                while (aNextMessage != null) {
+                    if (aMessage[0] == MIDIStatus_SysExStart.value) {
+                        // It's sysex, loop around and send it as a new packet.
+                        break;
                     }
+                    // Ok, it's a regular message, will it fit? The +1 here is for the timestamp lo.
+                    if (aNextMessage.length >= (kMaxPacketBufferSize - (aBytesUsed + 1))) {
+                        // The message won't fit, leave it in the queue and send
+                        // what we have.
+                        break;
+                    }
+                    // The message will fit. Go take it off the queue and append it to the packet.
+                    aMessage = this.takeFirstMessage();
+                    aBytesUsed += this.sendStandardMessageWithFollowingHeader(aMessage, aTimestampLo, packetDataStream);
+                    aNextMessage = midiTransferQueue.peek();     // can't block
                 }
-
-                if (!transferDataThreadAlive) {
+                if (!transferDataThreadAlive || !isRunning) {
                     break;
                 }
+
+                // Either the queue is empty or the packet stream is full. Send it out the door.
+                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
+                byte[] aPrintArray = packetDataStream.toByteArray();
+                transferData(packetDataStream.toByteArray());
+                packetDataStream.reset();
+
+                printPacket(aPrintArray);
             }
         }
     });
+
+    protected void printPacket(byte[] inPrintArray) {
+        // Dump the packet data as hex. For each byte with the high bit set,
+        // we start a new line for clarity.
+        Log.d("NSLOG", "MIDI data written: ");
+        StringBuilder sb = new StringBuilder();
+        for (byte aByte : inPrintArray) {
+            if ((aByte & 0x80) == 0x80) {       // If this is a status byte...
+                if (sb.length() > 0) {          // ...print the previous set of packet data
+                    Log.d("NSLOG", "0x" + sb);
+                    sb = new StringBuilder();
+                }
+            }
+            sb.append(String.format("%02X ", aByte));
+        }
+
+        // Print the final set of packet data.
+        if (sb.length() > 0) {
+            Log.d("NSLOG", "0x" + sb);
+        }
+    }
 
     protected MidiOutputDevice() {
         transferDataThread.start();
@@ -176,11 +366,14 @@ public abstract class MidiOutputDevice {
      */
     transient int writtenDataCount;
     private void storeTransferData(byte[] data) {
-        if (!transferDataThreadAlive || !isRunning) {
-            return;
-        }
 
-        synchronized (transferDataStream) {
+        // We will not create packets here. Instead, we add the incoming byte array
+        // (a complete MIDI message) to our queue, which the transfer thread pulls
+        // from. It is responsible for forming the packets.
+
+        midiTransferQueue.add(data);
+
+/*
             long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
             if (writtenDataCount == 0) {
                 // Store timestamp high
@@ -195,8 +388,9 @@ public abstract class MidiOutputDevice {
                 writtenDataCount += data.length;
             } catch (IOException ignored) {
             }
-            Log.d("NSLOG", "storeTransferData: byte count: " + writtenDataCount);
-        }
+
+ */
+        Log.d("NSLOG", "storeTransferData: added data of length: " + data.length);
     }
 
     /**
@@ -243,6 +437,9 @@ public abstract class MidiOutputDevice {
      *
      */
     public final void sendMidiSystemExclusive(@NonNull byte[] systemExclusive) {
+
+        midiTransferQueue.add(systemExclusive);
+/*
         byte[] timestampAddedSystemExclusive = new byte[systemExclusive.length + 2];
         System.arraycopy(systemExclusive, 0, timestampAddedSystemExclusive, 1, systemExclusive.length);
 
@@ -277,6 +474,8 @@ public abstract class MidiOutputDevice {
 
             timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
         }
+
+ */
     }
 
     /**
