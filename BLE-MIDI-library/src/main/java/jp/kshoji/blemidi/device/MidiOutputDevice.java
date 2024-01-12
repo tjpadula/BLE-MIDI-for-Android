@@ -133,17 +133,8 @@ public abstract class MidiOutputDevice {
                 if (inMessage.length < (kMaxPacketBufferSize - (aBytesUsed + 1))) {
                     // The remainder will fit. Copy all but the end-sysex status byte so
                     // we can insert the timestamp lo byte before end-sysex.
-                    System.arraycopy(inMessage,     // source
-                            0,                      // source start location
-                            aWriteMessage,          // destination
-                            0,                      // destination start location
-                            inMessage.length - 1);  // num to copy
-                    try {
-                        aPacketDataStream.write(aWriteMessage);
-                    } catch (IOException e) {
-                        transferDataThreadAlive = false;        // bail
-                        Log.d("NSLOG", "Interrupted aPacketDataStream.write()");
-                        break;
+                    for (int anIndex = 0; anIndex < inMessage.length - 1; anIndex++) {      // all but final sysex
+                        aPacketDataStream.write(inMessage[anIndex]);
                     }
                     aPacketDataStream.write(inTimestampLo);
                     aPacketDataStream.write(inMessage[inMessage.length - 1]);  // end sysex

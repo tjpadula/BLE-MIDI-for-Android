@@ -1,5 +1,8 @@
 package jp.kshoji.blemidi.sample;
 
+import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExEnd;
+import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExStart;
+
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -48,6 +51,7 @@ import jp.kshoji.blemidi.listener.OnMidiScanStatusListener;
 import jp.kshoji.blemidi.sample.util.SoundMaker;
 import jp.kshoji.blemidi.sample.util.Tone;
 import jp.kshoji.blemidi.util.BleUtils;
+import jp.kshoji.blemidi.util.MIDIStatus;
 
 /**
  * Activity for BLE MIDI Central Application
@@ -460,6 +464,101 @@ public class CentralActivity extends Activity {
         connectedOutputDevicesAdapter = new ArrayAdapter<>(getApplicationContext(), R.layout.simple_spinner_dropdown_item, android.R.id.text1, new ArrayList<MidiOutputDevice>());
         deviceSpinner.setAdapter(connectedOutputDevicesAdapter);
 
+        View.OnTouchListener sysexTouchListener = new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                MidiOutputDevice midiOutputDevice = getBleMidiOutputDeviceFromSpinner();
+                if (midiOutputDevice == null) {
+                    return false;
+                }
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        byte[] aSysexMessage = new byte[] { (byte) MIDIStatus_SysExStart.value,
+                                (byte) 0x10,        // Opcode R.I.P.
+
+                                (byte) 0x00,
+                                (byte) 0x01,
+                                (byte) 0x02,
+                                (byte) 0x03,
+                                (byte) 0x04,
+                                (byte) 0x05,
+                                (byte) 0x06,
+                                (byte) 0x07,
+                                (byte) 0x08,
+                                (byte) 0x09,
+                                (byte) 0x0A,
+                                (byte) 0x0B,
+                                (byte) 0x0C,
+                                (byte) 0x0D,
+                                (byte) 0x0E,
+                                (byte) 0x0F,
+
+                                (byte) 0x10,
+                                (byte) 0x11,
+                                (byte) 0x12,
+                                (byte) 0x13,
+                                (byte) 0x14,
+                                (byte) 0x15,
+                                (byte) 0x16,
+                                (byte) 0x17,
+                                (byte) 0x18,
+                                (byte) 0x19,
+                                (byte) 0x1A,
+                                (byte) 0x1B,
+                                (byte) 0x1C,
+                                (byte) 0x1D,
+                                (byte) 0x1E,
+                                (byte) 0x1F,
+
+                                (byte) 0x20,
+                                (byte) 0x21,
+                                (byte) 0x22,
+                                (byte) 0x23,
+                                (byte) 0x24,
+                                (byte) 0x25,
+                                (byte) 0x26,
+                                (byte) 0x27,
+                                (byte) 0x28,
+                                (byte) 0x29,
+                                (byte) 0x2A,
+                                (byte) 0x2B,
+                                (byte) 0x2C,
+                                (byte) 0x2D,
+                                (byte) 0x2E,
+                                (byte) 0x2F,
+
+                                (byte) 0x30,
+                                (byte) 0x31,
+                                (byte) 0x32,
+                                (byte) 0x33,
+                                (byte) 0x34,
+                                (byte) 0x35,
+                                (byte) 0x36,
+                                (byte) 0x37,
+                                (byte) 0x38,
+                                (byte) 0x39,
+                                (byte) 0x3A,
+                                (byte) 0x3B,
+                                (byte) 0x3C,
+                                (byte) 0x3D,
+                                (byte) 0x3E,
+                                (byte) 0x3F,
+
+                                (byte) MIDIStatus_SysExEnd.value
+                        };
+                        midiOutputDevice.sendMidiSystemExclusive(aSysexMessage);
+                        break;
+                    case MotionEvent.ACTION_UP:
+                        v.performClick();
+                        break;
+                    default:
+                        // do nothing.
+                        break;
+                }
+                return false;
+            }
+        };
+
         View.OnTouchListener onToneButtonTouchListener = new View.OnTouchListener() {
 
             @Override
@@ -507,7 +606,7 @@ public class CentralActivity extends Activity {
         findViewById(R.id.buttonA).setOnTouchListener(onToneButtonTouchListener);
         findViewById(R.id.buttonAis).setOnTouchListener(onToneButtonTouchListener);
         findViewById(R.id.buttonB).setOnTouchListener(onToneButtonTouchListener);
-        findViewById(R.id.buttonC2).setOnTouchListener(onToneButtonTouchListener);
+        findViewById(R.id.buttonC2).setOnTouchListener(sysexTouchListener);
 
         int whiteKeyColor = 0xFFFFFFFF;
         int blackKeyColor = 0xFF808080;
