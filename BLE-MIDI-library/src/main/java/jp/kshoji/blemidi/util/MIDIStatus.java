@@ -28,6 +28,12 @@ public enum MIDIStatus {
     // For masking the channel nybble out of a status byte, leaving the status:
     MIDIStatus_StatusMask((byte) 0xF0),
 
+    // For masking just the high bit, that is, the bit that indicates a system status message:
+    MIDIStatus_StatusBitMask((byte) 0x80),
+    MIDIStatus_StatusBit((byte) 0x80),
+
+    MIDIStatus_ValueBitMask((byte)0x7F),
+
     // System Common Messages, 0xF0..0xF7:
     MIDIStatus_SysExStart((byte) 0xF0),                // data: one- or three-byte ID, random number data bytes until 0xF7.
     MIDIStatus_TimeCode((byte) 0xF1),                  // data: one byte, 0tttdddd - ttt = type, dddd = data

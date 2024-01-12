@@ -1,7 +1,7 @@
 package jp.kshoji.blemidi.device;
 
-import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExEnd;
-import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExStart;
+import static jp.kshoji.blemidi.util.ControlChange.*;
+import static jp.kshoji.blemidi.util.MIDIStatus.*;
 
 import android.support.annotation.NonNull;
 import android.util.Log;
@@ -77,10 +77,9 @@ public abstract class MidiOutputDevice {
     }
 
     /**
-     * This method does not have any way to prevent it from firehosing the BT system. If
-     * a transfer takes more than 10 mSec to be sent, then this call could either block (bad)
-     * or clobber outgoing data (worse). Turns out calling transferData() before the hardware
-     * is ready clobbers data.
+     * This thread takes new MIDI events off the MIDI message transfer queue and sends them
+     * to the BT hardware only when the hardware is ready. There are no spin locks, as it uses
+     * a semaphore for flow control with the hardware. Data is sent on a best-effort basis.
      */
     volatile boolean transferDataThreadAlive;
     volatile boolean isRunning;
@@ -114,19 +113,19 @@ public abstract class MidiOutputDevice {
 
         private void sendSysexMessage(byte[] inMessage, byte inTimestampHi, byte inTimestampLo) {
             int aBytesUsed = 0;
-            final ByteArrayOutputStream packetDataStream = new ByteArrayOutputStream();
+            final ByteArrayOutputStream aPacketDataStream = new ByteArrayOutputStream();
             boolean aContinuingSysex = false;
             byte[] aWriteMessage = new byte[0];
             do {
-                packetDataStream.reset();
+                aPacketDataStream.reset();
                 if (aContinuingSysex) {
                     // Continuing packets have only the header byte.
-                    packetDataStream.write(inTimestampHi);
+                    aPacketDataStream.write(inTimestampHi);
                     aBytesUsed = 1;
                 } else {
                     // The first sysex packet has both header and timestamp lo.
-                    packetDataStream.write(inTimestampHi);
-                    packetDataStream.write(inTimestampLo);
+                    aPacketDataStream.write(inTimestampHi);
+                    aPacketDataStream.write(inTimestampLo);
                     aBytesUsed = 2;
                 }
 
@@ -140,23 +139,23 @@ public abstract class MidiOutputDevice {
                             0,                      // destination start location
                             inMessage.length - 1);  // num to copy
                     try {
-                        packetDataStream.write(aWriteMessage);
+                        aPacketDataStream.write(aWriteMessage);
                     } catch (IOException e) {
                         transferDataThreadAlive = false;        // bail
-                        Log.d("NSLOG", "Interrupted packetDataStream.write()");
+                        Log.d("NSLOG", "Interrupted aPacketDataStream.write()");
                         break;
                     }
-                    packetDataStream.write(inTimestampLo);
-                    packetDataStream.write(inMessage[inMessage.length - 1]);  // end sysex
+                    aPacketDataStream.write(inTimestampLo);
+                    aPacketDataStream.write(inMessage[inMessage.length - 1]);  // end sysex
                     inMessage = new byte[0];     // all done.
                 } else {
                     // The remainder of the message won't fit. Insert what we can.
                     aWriteMessage = Arrays.copyOf(inMessage, (kMaxPacketBufferSize - (aBytesUsed + 1)));
                     try {
-                        packetDataStream.write(aWriteMessage);
+                        aPacketDataStream.write(aWriteMessage);
                     } catch (IOException e) {
                         transferDataThreadAlive = false;        // bail
-                        Log.d("NSLOG", "Interrupted packetDataStream.write()");
+                        Log.d("NSLOG", "Interrupted aPacketDataStream.write()");
                         break;
                     }
                     // Copy the rest for next time around.
@@ -164,10 +163,10 @@ public abstract class MidiOutputDevice {
                     aContinuingSysex = true;        // Indicate we need a following packet.
                 }
 
-                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
-                byte[] aPrintArray = packetDataStream.toByteArray();
-                transferData(packetDataStream.toByteArray());
-                packetDataStream.reset();
+                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + aPacketDataStream.size());
+                byte[] aPrintArray = aPacketDataStream.toByteArray();
+                transferData(aPacketDataStream.toByteArray());
+                aPacketDataStream.reset();
 
                 printPacket(aPrintArray);
 
@@ -175,7 +174,7 @@ public abstract class MidiOutputDevice {
         }
 
         // Returns number of bytes in the packet that were used for this message including timestamps.
-        private int sendStandardMessageWithFirstHeader(byte[] inMessage, byte inTimestampHi, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
+        private int addStandardMessageWithFirstHeader(byte[] inMessage, byte inTimestampHi, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
             // It fits.
             inPacketDataStream.write(inTimestampHi);       // header
             inPacketDataStream.write(inTimestampLo);
@@ -190,7 +189,7 @@ public abstract class MidiOutputDevice {
         }
 
         // Returns number of bytes in the packet that were used for this message including timestamp.
-        private int sendStandardMessageWithFollowingHeader(byte[] inMessage, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
+        private int addStandardMessageWithFollowingHeader(byte[] inMessage, byte inTimestampLo, ByteArrayOutputStream inPacketDataStream) {
             try {
                 inPacketDataStream.write(inTimestampLo);
                 inPacketDataStream.write(inMessage);
@@ -204,7 +203,7 @@ public abstract class MidiOutputDevice {
         @Override
         public void run() {
             transferDataThreadAlive = true;
-            final ByteArrayOutputStream packetDataStream = new ByteArrayOutputStream();
+            final ByteArrayOutputStream aPacketDataStream = new ByteArrayOutputStream();
 
             while (transferDataThreadAlive) {
 
@@ -224,9 +223,9 @@ public abstract class MidiOutputDevice {
                 byte[] aMessage = this.takeFirstMessage();
 
                 // We have the first message for the packet. What time is it?
-                long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
-                byte aTimestampHi = (byte) (0x80 | ((timestamp >> 7) & 0x3f));
-                byte aTimestampLo = (byte) (0x80 | (timestamp & 0x7f));
+                long aTimestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
+                byte aTimestampHi = (byte) (0x80 | ((aTimestamp >> 7) & 0x3f));
+                byte aTimestampLo = (byte) (0x80 | (aTimestamp & 0x7f));
 
                 // What kind of message do we have?
                 if (aMessage[0] == MIDIStatus_SysExStart.value) {
@@ -242,7 +241,7 @@ public abstract class MidiOutputDevice {
                     continue;
 
                 } else if (aMessage.length < (kMaxPacketBufferSize - aBytesUsed)) { // Will the message fit?
-                    aBytesUsed += this.sendStandardMessageWithFirstHeader(aMessage, aTimestampHi, aTimestampLo, packetDataStream);
+                    aBytesUsed += this.addStandardMessageWithFirstHeader(aMessage, aTimestampHi, aTimestampLo, aPacketDataStream);
                 } else {
                     // This message is too long and it's not sysex --?
                     // Skip it.
@@ -258,7 +257,8 @@ public abstract class MidiOutputDevice {
                 byte[] aNextMessage = midiTransferQueue.peek();     // can't block
                 while (aNextMessage != null) {
                     if (aMessage[0] == MIDIStatus_SysExStart.value) {
-                        // It's sysex, loop around and send it as a new packet.
+                        // It's sysex, send the current packet and then
+                        // loop around and send the sysex message as a new packet.
                         break;
                     }
                     // Ok, it's a regular message, will it fit? The +1 here is for the timestamp lo.
@@ -268,8 +268,9 @@ public abstract class MidiOutputDevice {
                         break;
                     }
                     // The message will fit. Go take it off the queue and append it to the packet.
+                    // Then we will check the next message.
                     aMessage = this.takeFirstMessage();
-                    aBytesUsed += this.sendStandardMessageWithFollowingHeader(aMessage, aTimestampLo, packetDataStream);
+                    aBytesUsed += this.addStandardMessageWithFollowingHeader(aMessage, aTimestampLo, aPacketDataStream);
                     aNextMessage = midiTransferQueue.peek();     // can't block
                 }
                 if (!transferDataThreadAlive || !isRunning) {
@@ -277,12 +278,12 @@ public abstract class MidiOutputDevice {
                 }
 
                 // Either the queue is empty or the packet stream is full. Send it out the door.
-                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + writtenDataCount);
-                byte[] aPrintArray = packetDataStream.toByteArray();
-                transferData(packetDataStream.toByteArray());
-                packetDataStream.reset();
+                Log.d("NSLOG", "transferDataThread.run: writing byte count: " + aPacketDataStream.size());
+                byte[] aPrintArray = aPacketDataStream.toByteArray();
+                transferData(aPacketDataStream.toByteArray());
+                aPacketDataStream.reset();
 
-                printPacket(aPrintArray);
+//                printPacket(aPrintArray);
             }
         }
     });
@@ -293,7 +294,7 @@ public abstract class MidiOutputDevice {
         Log.d("NSLOG", "MIDI data written: ");
         StringBuilder sb = new StringBuilder();
         for (byte aByte : inPrintArray) {
-            if ((aByte & 0x80) == 0x80) {       // If this is a status byte...
+            if ((aByte & MIDIStatus_StatusBitMask.value) == MIDIStatus_StatusBit.value) {       // If this is a status byte...
                 if (sb.length() > 0) {          // ...print the previous set of packet data
                     Log.d("NSLOG", "0x" + sb);
                     sb = new StringBuilder();
@@ -343,28 +344,6 @@ public abstract class MidiOutputDevice {
         transferDataThread.interrupt();
     }
 
-    /**
-     * This is broken in several ways:
-     *      It has no flow control, that is, it can firehose the BT hardware.
-     *      It also does not check for excessive size of transferDataStream, which
-     *          can typically handle 20 bytes max, and break up packets as needed. Multiple
-     *          calls in a short time can overwhelm packet limits (such as an RPN call).
-     *      It does not properly deal with running status when starting a new packet.
-     *      It does not handle sysex properly.
-     *      It does not handle real-time system messages properly, that is, it does not
-     *          de-interleave them from non-sysex messages.
-     *      Timestamps are not guaranteed to be monotonically increasing, the same low timestamp
-     *          could be re-sent if multiple calls are made within the same millisecond.
-     *
-     * The timestamps are actually the big issue. We should buffer up messages as they come in
-     * without any time info and then create a proper packet of limited size and send it
-     * when BT indicates that it is ready. This keeps us from violating the monotonically
-     * increasing requirement while also preventing firehosing. It also keeps us from having
-     * to worry about violating the 'timestamps in the future' prohibition. A three-stream
-     * pattern of data messages can do this efficiently.
-     *
-     */
-    transient int writtenDataCount;
     private void storeTransferData(byte[] data) {
 
         // We will not create packets here. Instead, we add the incoming byte array
@@ -486,7 +465,7 @@ public abstract class MidiOutputDevice {
      * @param velocity 0-127
      */
     public final void sendMidiNoteOff(int channel, int note, int velocity) {
-        sendMidiMessage(0x80 | (channel & 0xf), note, velocity);
+        sendMidiMessage(MIDIStatus_NoteOff.value | (channel & MIDIStatus_ChannelMask.value), note, velocity);
     }
 
     /**
@@ -497,7 +476,7 @@ public abstract class MidiOutputDevice {
      * @param velocity 0-127
      */
     public final void sendMidiNoteOn(int channel, int note, int velocity) {
-        sendMidiMessage(0x90 | (channel & 0xf), note, velocity);
+        sendMidiMessage(MIDIStatus_NoteOn.value | (channel & MIDIStatus_ChannelMask.value), note, velocity);
     }
 
     /**
@@ -508,7 +487,7 @@ public abstract class MidiOutputDevice {
      * @param pressure 0-127
      */
     public final void sendMidiPolyphonicAftertouch(int channel, int note, int pressure) {
-        sendMidiMessage(0xa0 | (channel & 0xf), note, pressure);
+        sendMidiMessage(MIDIStatus_PolyphonicAfterTouch.value | (channel & MIDIStatus_ChannelMask.value), note, pressure);
     }
 
     /**
@@ -519,7 +498,7 @@ public abstract class MidiOutputDevice {
      * @param value 0-127
      */
     public final void sendMidiControlChange(int channel, int function, int value) {
-        sendMidiMessage(0xb0 | (channel & 0xf), function, value);
+        sendMidiMessage(MIDIStatus_ControlChange.value | (channel & MIDIStatus_ChannelMask.value), function, value);
     }
 
     /**
@@ -529,7 +508,7 @@ public abstract class MidiOutputDevice {
      * @param program 0-127
      */
     public final void sendMidiProgramChange(int channel, int program) {
-        sendMidiMessage(0xc0 | (channel & 0xf), program);
+        sendMidiMessage(MIDIStatus_ProgramChange.value | (channel & MIDIStatus_ChannelMask.value), program);
     }
 
     /**
@@ -539,7 +518,7 @@ public abstract class MidiOutputDevice {
      * @param pressure 0-127
      */
     public final void sendMidiChannelAftertouch(int channel, int pressure) {
-        sendMidiMessage(0xd0 | (channel & 0xf), pressure);
+        sendMidiMessage(MIDIStatus_ChannelAfterTouch.value | (channel & MIDIStatus_ChannelMask.value), pressure);
     }
 
     /**
@@ -549,7 +528,7 @@ public abstract class MidiOutputDevice {
      * @param amount 0(low)-8192(center)-16383(high)
      */
     public final void sendMidiPitchWheel(int channel, int amount) {
-        sendMidiMessage(0xe0 | (channel & 0xf), amount & 0x7f, (amount >> 7) & 0x7f);
+        sendMidiMessage(MIDIStatus_PitchWheel.value | (channel & MIDIStatus_ChannelMask.value), amount & MIDIStatus_ValueBitMask.value, (amount >> 7) & MIDIStatus_ValueBitMask.value);
     }
 
     /**
@@ -558,7 +537,7 @@ public abstract class MidiOutputDevice {
      * @param timing 0-127
      */
     public final void sendMidiTimeCodeQuarterFrame(int timing) {
-        sendMidiMessage(0xf1, timing & 0x7f);
+        sendMidiMessage(MIDIStatus_TimeCode.value, timing & MIDIStatus_ValueBitMask.value);
     }
 
     /**
@@ -567,7 +546,7 @@ public abstract class MidiOutputDevice {
      * @param song 0-127
      */
     public final void sendMidiSongSelect(int song) {
-        sendMidiMessage(0xf3, song & 0x7f);
+        sendMidiMessage(MIDIStatus_SongSelect.value, song & MIDIStatus_ValueBitMask.value);
     }
 
     /**
@@ -576,56 +555,56 @@ public abstract class MidiOutputDevice {
      * @param position 0-16383
      */
     public final void sendMidiSongPositionPointer(int position) {
-        sendMidiMessage(0xf2, position & 0x7f, (position >> 7) & 0x7f);
+        sendMidiMessage(MIDIStatus_SongPositionPointer.value, position & MIDIStatus_ValueBitMask.value, (position >> 7) & MIDIStatus_ValueBitMask.value);
     }
 
     /**
      * Tune Request
      */
     public final void sendMidiTuneRequest() {
-        sendMidiMessage(0xf6);
+        sendMidiMessage(MIDIStatus_TuneRequest.value);
     }
 
     /**
      * Timing Clock
      */
     public final void sendMidiTimingClock() {
-        sendMidiMessage(0xf8);
+        sendMidiMessage(MIDIStatus_TimingClock.value);
     }
 
     /**
      * Start Playing
      */
     public final void sendMidiStart() {
-        sendMidiMessage(0xfa);
+        sendMidiMessage(MIDIStatus_Start.value);
     }
 
     /**
      * Continue Playing
      */
     public final void sendMidiContinue() {
-        sendMidiMessage(0xfb);
+        sendMidiMessage(MIDIStatus_Continue.value);
     }
 
     /**
      * Stop Playing
      */
     public final void sendMidiStop() {
-        sendMidiMessage(0xfc);
+        sendMidiMessage(MIDIStatus_Stop.value);
     }
 
     /**
      * Active Sensing
      */
     public final void sendMidiActiveSensing() {
-        sendMidiMessage(0xfe);
+        sendMidiMessage(MIDIStatus_ActiveSensing.value);
     }
 
     /**
      * Reset Device
      */
     public final void sendMidiReset() {
-        sendMidiMessage(0xff);
+        sendMidiMessage(MIDIStatus_Reset.value);
     }
 
     /**
@@ -636,7 +615,7 @@ public abstract class MidiOutputDevice {
      * @param value 7bits or 14bits
      */
     public final void sendRPNMessage(int channel, int function, int value) {
-        sendRPNMessage(channel, (function >> 7) & 0x7f, function & 0x7f, value);
+        sendRPNMessage(channel, (function >> 7) & MIDIStatus_ValueBitMask.value, function & MIDIStatus_ValueBitMask.value, value);
     }
 
     /**
@@ -649,20 +628,20 @@ public abstract class MidiOutputDevice {
      */
     public final void sendRPNMessage(int channel, int functionMSB, int functionLSB, int value) {
         // send the function
-        sendMidiControlChange(channel, 101, functionMSB & 0x7f);
-        sendMidiControlChange(channel, 100, functionLSB & 0x7f);
+        sendMidiControlChange(channel, ControlChange_RegisteredParameterNumberMSB.value, functionMSB & MIDIStatus_ValueBitMask.value);
+        sendMidiControlChange(channel, ControlChange_RegisteredParameterNumberLSB.value, functionLSB & MIDIStatus_ValueBitMask.value);
 
         // send the value
         if ((value >> 7) > 0) {
-            sendMidiControlChange(channel, 6, (value >> 7) & 0x7f);
-            sendMidiControlChange(channel, 38, value & 0x7f);
+            sendMidiControlChange(channel, ControlChange_DataEntryMSB.value, (value >> 7) & MIDIStatus_ValueBitMask.value);
+            sendMidiControlChange(channel, ControlChange_DataEntryLSB.value, value & MIDIStatus_ValueBitMask.value);
         } else {
-            sendMidiControlChange(channel, 6, value & 0x7f);
+            sendMidiControlChange(channel, ControlChange_DataEntryMSB.value, value & MIDIStatus_ValueBitMask.value);
         }
 
         // send the NULL function
-        sendMidiControlChange(channel, 101, 0x7f);
-        sendMidiControlChange(channel, 100, 0x7f);
+        sendMidiControlChange(channel, ControlChange_RegisteredParameterNumberMSB.value, ControlChange_NullFunction.value);
+        sendMidiControlChange(channel, ControlChange_RegisteredParameterNumberLSB.value, ControlChange_NullFunction.value);
     }
 
     /**
@@ -673,7 +652,7 @@ public abstract class MidiOutputDevice {
      * @param value 7bits or 14bits
      */
     public final void sendNRPNMessage(int channel, int function, int value) {
-        sendNRPNMessage(channel, (function >> 7) & 0x7f, function & 0x7f, value);
+        sendNRPNMessage(channel, (function >> 7) & MIDIStatus_ValueBitMask.value, function & MIDIStatus_ValueBitMask.value, value);
     }
 
     /**
@@ -686,19 +665,19 @@ public abstract class MidiOutputDevice {
      */
     public final void sendNRPNMessage(int channel, int functionMSB, int functionLSB, int value) {
         // send the function
-        sendMidiControlChange(channel, 99, functionMSB & 0x7f);
-        sendMidiControlChange(channel, 98, functionLSB & 0x7f);
+        sendMidiControlChange(channel, ControlChange_NonRegisteredParameterNumberLSB.value, functionMSB & MIDIStatus_ValueBitMask.value);
+        sendMidiControlChange(channel, ControlChange_NonRegisteredParameterNumberLSB.value, functionLSB & MIDIStatus_ValueBitMask.value);
 
         // send the value
         if ((value >> 7) > 0) {
-            sendMidiControlChange(channel, 6, (value >> 7) & 0x7f);
-            sendMidiControlChange(channel, 38, value & 0x7f);
+            sendMidiControlChange(channel, ControlChange_DataEntryMSB.value, (value >> 7) & MIDIStatus_ValueBitMask.value);
+            sendMidiControlChange(channel, ControlChange_DataEntryLSB.value, value & MIDIStatus_ValueBitMask.value);
         } else {
-            sendMidiControlChange(channel, 6, value & 0x7f);
+            sendMidiControlChange(channel, ControlChange_DataEntryMSB.value, value & MIDIStatus_ValueBitMask.value);
         }
 
         // send the NULL function
-        sendMidiControlChange(channel, 101, 0x7f);
-        sendMidiControlChange(channel, 100, 0x7f);
+        sendMidiControlChange(channel, ControlChange_NonRegisteredParameterNumberLSB.value, ControlChange_NullFunction.value);
+        sendMidiControlChange(channel, ControlChange_NonRegisteredParameterNumberLSB.value, ControlChange_NullFunction.value);
     }
 }

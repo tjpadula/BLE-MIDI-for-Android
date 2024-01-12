@@ -16,8 +16,13 @@ public enum ControlChange {
     ControlChange_RegisteredParameterNumberLSB((byte) 0x64),        // data: Parameter number LSB, parameter value LSB
     ControlChange_RegisteredParameterNumberMSB((byte) 0x65),        // data: Parameter number MSB, parameter value MSB
 
+    ControlChange_NonRegisteredParameterNumberLSB((byte) 0x62),        // data: Parameter number LSB, parameter value LSB
+    ControlChange_NonRegisteredParameterNumberMSB((byte) 0x63),        // data: Parameter number MSB, parameter value MSB
+
     ControlChange_RPNLSB((byte) 0x64),      // Alias for ControlChange_RegisteredParameterNumberLSB
-    ControlChange_RPNMSB((byte) 0x65);      // Alias for ControlChange_RegisteredParameterNumberMSB
+    ControlChange_RPNMSB((byte) 0x65),      // Alias for ControlChange_RegisteredParameterNumberMSB
+
+    ControlChange_NullFunction((byte) 0x7F);
 
     public final byte value;
 
