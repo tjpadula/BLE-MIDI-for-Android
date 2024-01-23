@@ -20,7 +20,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -36,7 +35,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -51,7 +49,6 @@ import jp.kshoji.blemidi.listener.OnMidiScanStatusListener;
 import jp.kshoji.blemidi.sample.util.SoundMaker;
 import jp.kshoji.blemidi.sample.util.Tone;
 import jp.kshoji.blemidi.util.BleUtils;
-import jp.kshoji.blemidi.util.MIDIStatus;
 
 /**
  * Activity for BLE MIDI Central Application
@@ -146,7 +143,7 @@ public class CentralActivity extends Activity {
     // User interface
     final Handler midiInputEventHandler = new Handler(new Handler.Callback() {
         @Override
-        public boolean handleMessage(Message msg) {
+        public boolean handleMessage(@NonNull Message msg) {
             if (midiInputEventAdapter != null) {
                 midiInputEventAdapter.add((String)msg.obj);
             }
@@ -157,7 +154,7 @@ public class CentralActivity extends Activity {
 
     final Handler midiOutputEventHandler = new Handler(new Handler.Callback() {
         @Override
-        public boolean handleMessage(Message msg) {
+        public boolean handleMessage(@NonNull Message msg) {
             if (midiOutputEventAdapter != null) {
                 midiOutputEventAdapter.add((String)msg.obj);
             }
@@ -168,7 +165,7 @@ public class CentralActivity extends Activity {
 
     final Handler midiOutputConnectionChangedHandler = new Handler(new Handler.Callback() {
         @Override
-        public boolean handleMessage(Message msg) {
+        public boolean handleMessage(@NonNull Message msg) {
             if (msg.obj instanceof MidiOutputDevice) {
                 MidiOutputDevice midiOutputDevice = (MidiOutputDevice) msg.obj;
                 if (msg.arg1 == 0) {
@@ -224,6 +221,7 @@ public class CentralActivity extends Activity {
     OnMidiInputEventListener onMidiInputEventListener = new OnMidiInputEventListener() {
         @Override
         public void onMidiSystemExclusive(@NonNull MidiInputDevice sender, @NonNull byte[] systemExclusive) {
+//            Log.d ("NSLOG", "SystemExclusive from: " + sender.getDeviceName() + ", data:" + Arrays.toString(systemExclusive));
             midiInputEventHandler.sendMessage(Message.obtain(midiInputEventHandler, 0, "SystemExclusive from: " + sender.getDeviceName() + ", data:" + Arrays.toString(systemExclusive)));
 
             if (thruToggleButton != null && thruToggleButton.isChecked() && getBleMidiOutputDeviceFromSpinner() != null) {
@@ -288,6 +286,7 @@ public class CentralActivity extends Activity {
 
         @Override
         public void onMidiControlChange(@NonNull MidiInputDevice sender, int channel, int function, int value) {
+//            Log.d("NSLOG", "ControlChange from: " + sender.getDeviceName() + ", channel: " + channel + ", function: " + function + ", value: " + value);
             midiInputEventHandler.sendMessage(Message.obtain(midiInputEventHandler, 0, "ControlChange from: " + sender.getDeviceName() + ", channel: " + channel + ", function: " + function + ", value: " + value));
 
             if (thruToggleButton != null && thruToggleButton.isChecked() && getBleMidiOutputDeviceFromSpinner() != null) {
@@ -298,6 +297,7 @@ public class CentralActivity extends Activity {
 
         @Override
         public void onMidiProgramChange(@NonNull MidiInputDevice sender, int channel, int program) {
+//            Log.d("NSLOG", "ProgramChange from: " + sender.getDeviceName() + ", channel: " + channel + ", program: " + program);
             midiInputEventHandler.sendMessage(Message.obtain(midiInputEventHandler, 0, "ProgramChange from: " + sender.getDeviceName() + ", channel: " + channel + ", program: " + program));
 
             if (thruToggleButton != null && thruToggleButton.isChecked() && getBleMidiOutputDeviceFromSpinner() != null) {
@@ -325,6 +325,7 @@ public class CentralActivity extends Activity {
 
         @Override
         public void onMidiPitchWheel(@NonNull MidiInputDevice sender, int channel, int amount) {
+//            Log.d("NSLOG", "PitchWheel from: " + sender.getDeviceName() + ", channel: " + channel + ", amount: " + amount);
             midiInputEventHandler.sendMessage(Message.obtain(midiInputEventHandler, 0, "PitchWheel from: " + sender.getDeviceName() + ", channel: " + channel + ", amount: " + amount));
 
             if (thruToggleButton != null && thruToggleButton.isChecked() && getBleMidiOutputDeviceFromSpinner() != null) {
@@ -451,7 +452,6 @@ public class CentralActivity extends Activity {
 
         ListView midiInputEventListView = (ListView) findViewById(R.id.midiInputEventListView);
         midiInputEventAdapter = new ArrayAdapter<>(this, R.layout.midi_event, R.id.midiEventDescriptionTextView);
-        midiInputEventAdapter = new ArrayAdapter<>(this, R.layout.midi_event, R.id.midiEventDescriptionTextView);
         midiInputEventListView.setAdapter(midiInputEventAdapter);
 
         ListView midiOutputEventListView = (ListView) findViewById(R.id.midiOutputEventListView);
@@ -464,7 +464,26 @@ public class CentralActivity extends Activity {
         connectedOutputDevicesAdapter = new ArrayAdapter<>(getApplicationContext(), R.layout.simple_spinner_dropdown_item, android.R.id.text1, new ArrayList<MidiOutputDevice>());
         deviceSpinner.setAdapter(connectedOutputDevicesAdapter);
 
-        View.OnTouchListener sysexTouchListener = new View.OnTouchListener() {
+        View.OnTouchListener testParserTouchListener = new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+
+                        break;
+
+                    case MotionEvent.ACTION_UP:
+                        v.performClick();
+                        break;
+                    default:
+                        // do nothing.
+                        break;
+                }
+                return false;
+            }
+        };
+
+         View.OnTouchListener sysexTouchListener = new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 MidiOutputDevice midiOutputDevice = getBleMidiOutputDeviceFromSpinner();
@@ -568,7 +587,7 @@ public class CentralActivity extends Activity {
                     return false;
                 }
 
-                int note = 60 + Integer.parseInt((String) v.getTag());
+//                int note = 60 + Integer.parseInt((String) v.getTag());
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
                         midiOutputDevice.sendRPNMessage(1, 0, 0, 128);
@@ -780,6 +799,7 @@ public class CentralActivity extends Activity {
         } else if (requestCode == BleUtils.SELECT_DEVICE_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ScanResult scanResult = data.getParcelableExtra(CompanionDeviceManager.EXTRA_DEVICE);
+                assert scanResult != null;
                 bleMidiCentralProvider.connectGatt(scanResult.getDevice());
             }
         }

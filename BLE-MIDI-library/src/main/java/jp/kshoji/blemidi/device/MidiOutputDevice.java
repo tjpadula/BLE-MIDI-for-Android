@@ -274,7 +274,7 @@ public abstract class MidiOutputDevice {
                 transferData(aPacketDataStream.toByteArray());
                 aPacketDataStream.reset();
 
-//                printPacket(aPrintArray);
+//                printPacketLine(aPrintArray);
             }
         }
     });
@@ -298,6 +298,22 @@ public abstract class MidiOutputDevice {
         if (sb.length() > 0) {
             Log.d("NSLOG", "0x" + sb);
         }
+    }
+
+    // Print the entire packet as a single string of bytes, ready to init a byte[] with, like this:
+    //    { 0x00, 0x01, 0x02 }
+    protected void printPacketLine(byte[] inPrintArray) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{ ");
+        for (int anIndex = 0; anIndex < inPrintArray.length; anIndex++) {
+            byte aByte = inPrintArray[anIndex];
+            if (anIndex == (inPrintArray.length - 1)) {
+                sb.append(String.format("0x%02X }", aByte));
+            } else {
+                sb.append(String.format("0x%02X, ", aByte));
+            }
+        }
+        Log.d("PACKET", String.valueOf(sb));
     }
 
     protected MidiOutputDevice() {
@@ -340,6 +356,12 @@ public abstract class MidiOutputDevice {
         // We will not create packets here. Instead, we add the incoming byte array
         // (a complete MIDI message) to our queue, which the transfer thread pulls
         // from. It is responsible for forming the packets.
+        // Add the current hi/lo timestamps to this. Then when we pull the messages
+        // from the queue they already have timestamp info ready at the moment they
+        // arrived. Yes, we have to check for size and skip the timestamp hi byte
+        // but this allows us to ensure that the actual timing of the MIDI messages
+        // gets included at the receiving end, however useless that information
+        // may be.
 
         midiTransferQueue.add(data);
 
