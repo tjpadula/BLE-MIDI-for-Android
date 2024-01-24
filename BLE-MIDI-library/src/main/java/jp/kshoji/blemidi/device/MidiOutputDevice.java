@@ -3,6 +3,7 @@ package jp.kshoji.blemidi.device;
 import static jp.kshoji.blemidi.util.ControlChange.*;
 import static jp.kshoji.blemidi.util.MIDIStatus.*;
 
+import android.content.BroadcastReceiver;
 import android.support.annotation.NonNull;
 import android.util.Log;
 
@@ -23,7 +24,7 @@ public abstract class MidiOutputDevice {
 
     public final Semaphore writeToBTSemaphore = new Semaphore(1);
 
-    private final LinkedTransferQueue<byte[]> midiTransferQueue = new LinkedTransferQueue<byte[]>();
+    private final LinkedTransferQueue<MessageWithTimestamp> midiTransferQueue = new LinkedTransferQueue<MessageWithTimestamp>();
 
     /**
      * Transfer data
@@ -99,8 +100,8 @@ public abstract class MidiOutputDevice {
             } while (!acquiredSuccessfully);
         }
 
-        private byte[] takeFirstMessage() {
-            byte[] aMessage = null;
+        private MessageWithTimestamp takeFirstMessage() {
+            MessageWithTimestamp aMessage = null;
             do {
                 try {
                     aMessage = midiTransferQueue.take();        // This blocks.
@@ -211,28 +212,30 @@ public abstract class MidiOutputDevice {
 
                 // We have the semaphore. Assemble as much data as will fit in a packet
                 // and send it along.
-                byte[] aMessage = this.takeFirstMessage();
-
-                // We have the first message for the packet. What time is it?
-                long aTimestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
-                byte aTimestampHi = (byte) (0x80 | ((aTimestamp >> 7) & 0x3f));
-                byte aTimestampLo = (byte) (0x80 | (aTimestamp & 0x7f));
+                MessageWithTimestamp aMessageWithTimestamp = this.takeFirstMessage();
+                byte[] aMessage = aMessageWithTimestamp.getMessage();
 
                 // What kind of message do we have?
                 if (aMessage[0] == MIDIStatus_SysExStart.value) {
-                    if (aMessage[aMessage.length - 1] != MIDIStatus_SysExEnd.value) {
+
+                    if (aMessage[aMessage.length - 1] != MIDIStatus_SysExEnd.value) {   // malformed sysex message
                         Log.d("NSLOG", "Sysex message does not end with sysex end status byte: " + aMessage[aMessage.length - 1]);
                         printPacket(aMessage);
                         continue;
                     }
-                    this.sendSysexMessage(aMessage, aTimestampHi, aTimestampLo);
+                    this.sendSysexMessage(aMessage,
+                            aMessageWithTimestamp.getTimestampHi(),
+                            aMessageWithTimestamp.getTimestampLo());
 
                     // Yes, conceivably another message from the queue could fit after the
                     // last sysex message. Start fresh anyway.
                     continue;
 
                 } else if (aMessage.length < (kMaxPacketBufferSize - aBytesUsed)) { // Will the message fit?
-                    aBytesUsed += this.addStandardMessageWithFirstHeader(aMessage, aTimestampHi, aTimestampLo, aPacketDataStream);
+                    aBytesUsed += this.addStandardMessageWithFirstHeader(aMessage,
+                            aMessageWithTimestamp.getTimestampHi(),
+                            aMessageWithTimestamp.getTimestampLo(),
+                            aPacketDataStream);
                 } else {
                     // This message is too long and it's not sysex --?
                     // Skip it.
@@ -245,36 +248,44 @@ public abstract class MidiOutputDevice {
                 }
 
                 // Check for the next message. If it will fit, add it, then check again.
-                byte[] aNextMessage = midiTransferQueue.peek();     // can't block
-                while (aNextMessage != null) {
-                    if (aMessage[0] == MIDIStatus_SysExStart.value) {
-                        // It's sysex, send the current packet and then
+                MessageWithTimestamp aNextMessageWithTimestamp = midiTransferQueue.peek();     // can't block
+                while (aNextMessageWithTimestamp != null) {
+                    byte[] aNextMessage = aNextMessageWithTimestamp.getMessage();
+
+                    if (aNextMessage[0] == MIDIStatus_SysExStart.value) {
+                        // The next message is sysex, send the current packet and then
                         // loop around and send the sysex message as a new packet.
                         break;
                     }
+
                     // Ok, it's a regular message, will it fit? The +1 here is for the timestamp lo.
                     if (aNextMessage.length >= (kMaxPacketBufferSize - (aBytesUsed + 1))) {
                         // The message won't fit, leave it in the queue and send
                         // what we have.
                         break;
                     }
+
                     // The message will fit. Go take it off the queue and append it to the packet.
-                    // Then we will check the next message.
-                    aMessage = this.takeFirstMessage();
-                    aBytesUsed += this.addStandardMessageWithFollowingHeader(aMessage, aTimestampLo, aPacketDataStream);
-                    aNextMessage = midiTransferQueue.peek();     // can't block
+                    aMessageWithTimestamp = this.takeFirstMessage();        // won't block
+                    aBytesUsed += this.addStandardMessageWithFollowingHeader(aMessageWithTimestamp.getMessage(),
+                            aMessageWithTimestamp.getTimestampLo(),
+                            aPacketDataStream);
+
+                    // Check the new next message.
+                    aNextMessageWithTimestamp = midiTransferQueue.peek();   // can't block
                 }
                 if (!transferDataThreadAlive || !isRunning) {
                     break;
                 }
 
-                // Either the queue is empty or the packet stream is full. Send it out the door.
+                // Either the queue is empty, the packet stream is full, or the next message will
+                // be sysex. Send it out the door.
                 Log.d("NSLOG", "transferDataThread.run: writing byte count: " + aPacketDataStream.size());
                 byte[] aPrintArray = aPacketDataStream.toByteArray();
                 transferData(aPacketDataStream.toByteArray());
                 aPacketDataStream.reset();
 
-//                printPacketLine(aPrintArray);
+                printPacketLine(aPrintArray);
             }
         }
     });
@@ -351,6 +362,34 @@ public abstract class MidiOutputDevice {
         transferDataThread.interrupt();
     }
 
+    private class MessageWithTimestamp  {
+
+        private final byte mTimestampHi;
+        private final byte mTimestampLo;
+        private final byte[] mMessage;
+
+        MessageWithTimestamp(byte[] data) {
+
+            // What time is it?
+            long aTimestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
+            mTimestampHi = (byte) (0x80 | ((aTimestamp >> 7) & 0x3f));
+            mTimestampLo = (byte) (0x80 | (aTimestamp & 0x7f));
+
+            mMessage = data;
+        }
+
+        byte getTimestampHi() {
+            return mTimestampHi;
+        }
+        byte getTimestampLo() {
+            return mTimestampLo;
+        }
+        byte[] getMessage() {
+            return mMessage;
+        }
+    }
+
+
     private void storeTransferData(byte[] data) {
 
         // We will not create packets here. Instead, we add the incoming byte array
@@ -363,7 +402,7 @@ public abstract class MidiOutputDevice {
         // gets included at the receiving end, however useless that information
         // may be.
 
-        midiTransferQueue.add(data);
+        midiTransferQueue.add(new MessageWithTimestamp(data));
 
 /*
             long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
@@ -430,7 +469,7 @@ public abstract class MidiOutputDevice {
      */
     public final void sendMidiSystemExclusive(@NonNull byte[] systemExclusive) {
 
-        midiTransferQueue.add(systemExclusive);
+        midiTransferQueue.add(new MessageWithTimestamp(systemExclusive));
 /*
         byte[] timestampAddedSystemExclusive = new byte[systemExclusive.length + 2];
         System.arraycopy(systemExclusive, 0, timestampAddedSystemExclusive, 1, systemExclusive.length);
