@@ -13,6 +13,8 @@ import java.util.Arrays;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.Semaphore;
 
+import jp.kshoji.blemidi.util.MIDIStatus;
+
 /**
  * Represents BLE MIDI Output Device
  *
@@ -296,7 +298,7 @@ public abstract class MidiOutputDevice {
         Log.d("NSLOG", "MIDI data written: ");
         StringBuilder sb = new StringBuilder();
         for (byte aByte : inPrintArray) {
-            if ((aByte & MIDIStatus_StatusBitMask.value) == MIDIStatus_StatusBit.value) {       // If this is a status byte...
+            if ((aByte & 0x80) == 0x80) {       // If this is a status byte...
                 if (sb.length() > 0) {          // ...print the previous set of packet data
                     Log.d("NSLOG", "0x" + sb);
                     sb = new StringBuilder();
@@ -307,7 +309,7 @@ public abstract class MidiOutputDevice {
 
         // Print the final set of packet data.
         if (sb.length() > 0) {
-            Log.d("NSLOG", "0x" + sb);
+            Log.d("PACKET", "0x" + sb);
         }
     }
 
@@ -404,23 +406,6 @@ public abstract class MidiOutputDevice {
 
         midiTransferQueue.add(new MessageWithTimestamp(data));
 
-/*
-            long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
-            if (writtenDataCount == 0) {
-                // Store timestamp high
-                transferDataStream.write((byte) (0x80 | ((timestamp >> 7) & 0x3f)));
-                writtenDataCount++;
-            }
-            // timestamp low
-            transferDataStream.write((byte) (0x80 | (timestamp & 0x7f)));
-            writtenDataCount++;
-            try {
-                transferDataStream.write(data);
-                writtenDataCount += data.length;
-            } catch (IOException ignored) {
-            }
-
- */
         Log.d("NSLOG", "storeTransferData: added data of length: " + data.length);
     }
 
@@ -459,55 +444,12 @@ public abstract class MidiOutputDevice {
      *
      * @param systemExclusive : start with 'F0', and end with 'F7'
      *
-     * This does not handle the per-buffer timestamps properly.
-     * Tinkering with a timestamp value to avoid breaking the parser elsewhere in
-     * this module is no bueno - it could violate the monotonically increasing requirement.
-     * System real-time messages are not properly inserted with sysex, as they dispatch
-     * through the transfer data thread above.
-     * And, as in storeTransferData(), this can firehose the BT hardware.
+     * Simply add tht sysex message to the queue like any other.
      *
      */
     public final void sendMidiSystemExclusive(@NonNull byte[] systemExclusive) {
-
         midiTransferQueue.add(new MessageWithTimestamp(systemExclusive));
-/*
-        byte[] timestampAddedSystemExclusive = new byte[systemExclusive.length + 2];
-        System.arraycopy(systemExclusive, 0, timestampAddedSystemExclusive, 1, systemExclusive.length);
-
-        long timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
-
-        // extend a byte for timestamp LSB, before the last byte('F7')
-        timestampAddedSystemExclusive[systemExclusive.length + 1] = systemExclusive[systemExclusive.length - 1];
-        // set first byte to timestamp LSB
-        timestampAddedSystemExclusive[0] = (byte) (0x80 | (timestamp & 0x7f));
-
-        // split into bufferSize bytes. BLE can't send more than (bufferSize: MTU - 3) bytes.
-        int bufferSize = getBufferSize();
-        byte[] writeBuffer = new byte[bufferSize];
-        for (int i = 0; i < timestampAddedSystemExclusive.length; i += (bufferSize - 1)) {
-            // Don't send 0xF7 timestamp LSB inside of SysEx(MIDI parser will fail) 0x7f -> 0x7e
-            timestampAddedSystemExclusive[systemExclusive.length] = (byte) (0x80 | (timestamp & 0x7e));
-
-            if (i + (bufferSize - 1) <= timestampAddedSystemExclusive.length) {
-                System.arraycopy(timestampAddedSystemExclusive, i, writeBuffer, 1, (bufferSize - 1));
-            } else {
-                // last message
-                writeBuffer = new byte[timestampAddedSystemExclusive.length - i + 1];
-
-                System.arraycopy(timestampAddedSystemExclusive, i, writeBuffer, 1, timestampAddedSystemExclusive.length - i);
-            }
-
-            // timestamp MSB
-            writeBuffer[0] = (byte) (0x80 | ((timestamp >> 7) & 0x3f));
-
-            // immediately transfer data
-            transferData(writeBuffer);
-
-            timestamp = System.currentTimeMillis() % MAX_TIMESTAMP;
-        }
-
- */
-    }
+   }
 
     /**
      * Note-off
@@ -539,7 +481,7 @@ public abstract class MidiOutputDevice {
      * @param pressure 0-127
      */
     public final void sendMidiPolyphonicAftertouch(int channel, int note, int pressure) {
-        sendMidiMessage(MIDIStatus_PolyphonicAfterTouch.value | (channel & MIDIStatus_ChannelMask.value), note, pressure);
+        sendMidiMessage(MIDIStatus_PolyphonicKeyPressure.value | (channel & MIDIStatus_ChannelMask.value), note, pressure);
     }
 
     /**
@@ -570,7 +512,7 @@ public abstract class MidiOutputDevice {
      * @param pressure 0-127
      */
     public final void sendMidiChannelAftertouch(int channel, int pressure) {
-        sendMidiMessage(MIDIStatus_ChannelAfterTouch.value | (channel & MIDIStatus_ChannelMask.value), pressure);
+        sendMidiMessage(MIDIStatus_ChannelPressure.value | (channel & MIDIStatus_ChannelMask.value), pressure);
     }
 
     /**

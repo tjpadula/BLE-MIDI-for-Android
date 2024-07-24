@@ -1,5 +1,6 @@
 package jp.kshoji.blemidi.sample;
 
+import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_ChannelPressure;
 import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExEnd;
 import static jp.kshoji.blemidi.util.MIDIStatus.MIDIStatus_SysExStart;
 
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -49,6 +51,7 @@ import jp.kshoji.blemidi.listener.OnMidiScanStatusListener;
 import jp.kshoji.blemidi.sample.util.SoundMaker;
 import jp.kshoji.blemidi.sample.util.Tone;
 import jp.kshoji.blemidi.util.BleUtils;
+import jp.kshoji.blemidi.util.MIDIStatus;
 
 /**
  * Activity for BLE MIDI Central Application
@@ -483,7 +486,7 @@ public class CentralActivity extends Activity {
             }
         };
 
-         View.OnTouchListener sysexTouchListener = new View.OnTouchListener() {
+        View.OnTouchListener sysexTouchListener = new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 MidiOutputDevice midiOutputDevice = getBleMidiOutputDeviceFromSpinner();
