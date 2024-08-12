@@ -13,11 +13,11 @@ import android.os.ParcelUuid;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
+import com.github.tjpadula.blemidi.R;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-
-import jp.kshoji.blemidi.R;
 
 /**
  * Utility for finding BLE MIDI devices
