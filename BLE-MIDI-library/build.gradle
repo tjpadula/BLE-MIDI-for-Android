@@ -28,12 +28,13 @@ android {
             withSourcesJar()
         }
     }
-    namespace 'jp.kshoji.blemidi'
+    namespace 'com.github.tjpadula.blemidi'
 }
 
 repositories {
     maven {
         url 'https://github.com/kshoji/javax.sound.midi-for-Android/raw/develop/javax.sound.midi/repository'
+//        url 'https://github.com/tjpadula/javax.sound.midi-for-Android:v0.0.8-alpha'
     }
     mavenCentral()
 }
@@ -48,9 +49,10 @@ dependencies {
 publishing {
     publications {
         release(MavenPublication) {
-            group = 'jp.kshoji'
+//            group = 'jp.kshoji'
+            group = 'com.github.tjpadula'
             artifactId = 'ble-midi'
-            version = '0.0.15'
+            version = '0.0.16'
 
             afterEvaluate {
                 from components.release

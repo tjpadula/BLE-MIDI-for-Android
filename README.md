@@ -45,7 +45,7 @@ Reasons for this fork:
 
 To use this library, put this in your app's build.gradle dependencies:
 
-implementation 'com.github.tjpadula:BLE-MIDI-library:v0.0.15-alpha'
+implementation 'com.github.tjpadula:BLE-MIDI-library:v0.0.16-alpha'
 
 ...and ensure that you have this reference to jitpack line in settings.gradle:
 
