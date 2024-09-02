@@ -225,7 +225,9 @@ public final class BleMidiParser {
                 midiState = MIDI_STATE_WAIT;
             }
 
-            if (midiEvent == MIDIStatus.MIDIStatus_SysExEnd.value) {
+            // Need this coercion, otherwise the sysex end gets sign extended then compared
+            // as an int, which is negative, and will always be false.
+            if ((byte) midiEvent == MIDIStatus.MIDIStatus_SysExEnd.value) {     // force 8-bit comparison
                 // is this end of SysEx???
                 synchronized (systemExclusiveLock) {
                     if (systemExclusiveRecoveryStream.size() > 0) {
@@ -268,7 +270,7 @@ public final class BleMidiParser {
             timestamp = ((header & 0x3f) << 7) | (midiEvent & 0x7f);
             midiState = MIDI_STATE_WAIT;
         } else if (midiState == MIDI_STATE_WAIT) {
-            switch (midiEvent & MIDIStatus_StatusMask.value) {
+            switch (midiEvent & MIDIStatus_StatusMask.value) {  // bitwise AND is 8-bits, ok
                 case 0xf0: {
                     switch (midiEvent) {
                         case 0xf0:
@@ -409,7 +411,7 @@ public final class BleMidiParser {
                     break;
             }
         } else if (midiState == MIDI_STATE_SIGNAL_2BYTES_2) {
-            switch (midiEventKind & MIDIStatus_StatusMask.value) {
+            switch (midiEventKind & MIDIStatus_StatusMask.value) {  // bitwise AND is 8-bits, ok
                 // 2bytes pattern
                 case 0xc0: // program change
                     midiEventNote = midiEvent;
@@ -476,7 +478,7 @@ public final class BleMidiParser {
                     break;
             }
         } else if (midiState == MIDI_STATE_SIGNAL_3BYTES_2) {
-            switch (midiEventKind & MIDIStatus_StatusMask.value) {
+            switch (midiEventKind & MIDIStatus_StatusMask.value) {  // bitwise AND is 8-bits, ok
                 case 0x80:
                 case 0x90:
                 case 0xa0:
@@ -493,7 +495,7 @@ public final class BleMidiParser {
                     break;
             }
         } else if (midiState == MIDI_STATE_SIGNAL_3BYTES_3) {
-            switch (midiEventKind & MIDIStatus_StatusMask.value) {
+            switch (midiEventKind & MIDIStatus_StatusMask.value) {  // bitwise AND is 8-bits, ok
                 // 3bytes pattern
                 case 0x80: // note off
                     midiEventVelocity = midiEvent;
@@ -677,7 +679,9 @@ public final class BleMidiParser {
                     break;
             }
         } else if (midiState == MIDI_STATE_SIGNAL_SYSEX) {
-            if (midiEvent == MIDIStatus_SysExEnd.value) {
+            // Need this coercion, otherwise the sysex end gets sign extended then compared
+            // as an int, which is negative, and will always be false.
+            if ((byte) midiEvent == MIDIStatus_SysExEnd.value) {        // force 8-bit comparison
                 // the end of message
                 synchronized (systemExclusiveLock) {
                     // last written byte is for timestamp

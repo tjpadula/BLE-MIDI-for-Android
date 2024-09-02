@@ -796,6 +796,10 @@ public final class BleMidiCallback extends BluetoothGattCallback {
 //            }
 //            Log.d("NSLOG", "incomingData: " + sb);
 
+            /*
+            Octave+ button from CME Xkey 37:
+            { 0xA6, 0xFD, 0xF0, 0x00, 0x20, 0x63, 0x0F, 0x04, 0x59, 0x00, 0x41, 0x40, 0xFC, 0xF7 }
+             */
 //            printPacketLine(data);
             midiParser.parse(data);
         }
